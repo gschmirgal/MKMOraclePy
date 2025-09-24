@@ -1,0 +1,9 @@
+[Database]
+host     = yourhost
+user     = user
+password = pwd
+database = mkmpy
+port     = 3306
+
+[Folders]
+temp       = ./data/
