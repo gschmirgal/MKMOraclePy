@@ -1,174 +1,180 @@
+
+# =============================
+# Module : predictopi.py
+# =============================
+# Ce module définit la classe 'predictopi', dédiée à la prévision du prix des cartes Magic vendues sur le site Cardmarket.
+# Il permet de charger les historiques de prix, d'entraîner un modèle de machine learning (RandomForest) sur ces séries temporelles,
+# puis de prédire l'évolution future des prix pour chaque carte, et d'insérer ces prévisions en base de données.
+
 import configparser
 import os
-
 import joblib
 import numpy as np
 import pandas as pd
 from sklearn.discriminant_analysis import StandardScaler
 from sklearn.ensemble import RandomForestRegressor
-
 from . import common
 from . import db
 
-# Module : ia.py
-# Ce module définit la classe 'ia', qui est utilisée pour rassembler des données, entraîner un modèle de RandomForest
-# sur des séries temporelles et réaliser des prédictions futures en utilisant un fenêtrage glissant.
-
 class predictopi:
-    """Classe de prédiction de séries temporelles financières avec un modèle RandomForest.
+    """
+    Classe de prévision du prix des cartes Magic vendues sur Cardmarket, basée sur un modèle RandomForest.
 
-    Cette classe permet de:
-      - Charger la configuration et instancier une connexion à la base de données.
-      - Rassembler les données de la table 'prices', en séparant les valeurs normales ('n') et foil ('f') pour chaque produit.
-      - Entraîner un modèle RandomForest sur des fenêtres temporelles extraites des séries, avec normalisation via StandardScaler.
-      - Effectuer des prédictions en chaîne pour prévoir les prochaines valeurs d'une série.
+    Fonctionnalités principales :
+        - Chargement de la configuration et connexion à la base de données.
+        - Extraction et préparation des historiques de prix (normal et foil) pour chaque carte Magic.
+        - Entraînement d'un modèle RandomForest sur des fenêtres glissantes de l'historique de prix.
+        - Prédiction de l'évolution future du prix pour chaque carte.
+        - Export des prévisions au format CSV et insertion en base de données.
 
-    Attributs principaux:
-      temp_folder, db, window_size, nb_predictions, rf_model, scaler_X, series_dict.
+    Attributs principaux :
+        - temp_folder : dossier temporaire pour les modèles et fichiers intermédiaires
+        - db : instance de connexion à la base de données
+        - window_size : taille de la fenêtre glissante pour l'apprentissage
+        - nb_predictions : nombre de jours à prédire
+        - rf_model : modèle RandomForestRegressor
+        - scaler_X : normaliseur des features
+        - series_dict : dictionnaire des historiques de prix par carte
     """
     def __init__(self, reset = False):
-        """Initialise l'objet ia en chargeant la configuration, en établissant la connexion à la base de données, et en préparant le modèle.
-
-        Si reset est False et que les modèles sauvegardés existent, ils sont chargés ; sinon, de nouveaux objets sont créés.
         """
-        # Lecture du fichier de configuration
+        Initialise l'objet predictopi pour la prévision des prix Cardmarket :
+        - Charge la configuration (chemin des fichiers, etc.)
+        - Instancie la connexion à la base de données
+        - Charge le modèle et le scaler s'ils existent, sinon les crée
+        - Définit les paramètres de fenêtre et de prédiction
+
+        :param reset: Si True, force la réinitialisation du modèle et du scaler
+        """
         config = configparser.ConfigParser()
         config.read('config.ini')
-
-        # Définition du dossier temporaire pour stocker les modèles
         self.temp_folder = config.get('Folders', 'temp', fallback='./data/')
-        # Création d'une instance de connexion à la base de données
         self.db = db.dbMkmPy()
-
-        # Paramètres de la fenêtre pour les séries temporelles et le nombre de prédictions
         self.window_size = 4
         self.nb_predictions = 7
-
-        # Chargement du modèle et du scaler depuis le dossier temporaire si disponibles,
-        # sinon, initialisation d'un nouveau scaler et modèle RandomForest
-        if( reset == False and 
+        self.series_dict = None
+        # Chargement ou création du modèle/scaler
+        if( not reset and 
            os.path.exists(self.temp_folder+"rf_model_mem.joblib") and 
            os.path.exists(self.temp_folder+"scaler_X.joblib") ):
             self.rf_model = joblib.load(self.temp_folder+"rf_model_mem.joblib")
             self.scaler_X = joblib.load(self.temp_folder+"scaler_X.joblib")
         else:
             self.scaler_X = StandardScaler()
-            self.rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
+            # Configuration optimisée pour la prédiction de prix de cartes Magic
+            self.rf_model = RandomForestRegressor(
+                n_estimators=200,        # Plus d'arbres pour meilleure précision
+                max_depth=15,           # Limite la profondeur pour éviter le surapprentissage
+                min_samples_split=5,    # Réduit le surapprentissage sur petites séries
+                min_samples_leaf=2,     # Feuilles plus générales
+                max_features='sqrt',    # Utilise racine carrée du nombre de features
+                n_jobs=-1,              # Utilise tous les cœurs CPU
+                random_state=42,        # Reproductibilité
+                oob_score=True          # Score de validation interne
+            )
 
     def gatherData(self, limit=None):
-        """Collecte les données depuis la base de données.
-
-        Récupère la date maximale présente dans 'prices' et, selon le paramètre limit, sélectionne les données correspondantes.
-        Construit un dictionnaire dans lequel chaque clé est l'ID d'un produit et la valeur est un sous-dictionnaire contenant:
-          - 'n' : série des valeurs normales
-          - 'f' : série des valeurs foil
-
-        Retourne ce dictionnaire de séries.
         """
-        # Récupération de la date maximale présente dans les données
+        Récupère et prépare les historiques de prix des cartes Magic depuis la base de données.
+        - Récupère la date maximale disponible
+        - Sélectionne les données sur la période souhaitée (limit en jours)
+        - Construit un dictionnaire de séries numpy pour chaque carte (prix normal et foil)
+
+        :param limit: Nombre de jours à récupérer (None = tout)
+        :return: Dictionnaire {idCarte: {'avg1': array, 'avg1_foil': array}}
+        """
         self.maxDate = self.db.get1value("SELECT MAX(date_data) FROM prices")
         if( limit is not None ):
             results = self.db.query(f"SELECT idProduct, avg1, avg1_foil FROM prices WHERE date_data >= DATE_SUB('{self.maxDate}', INTERVAL {limit} DAY) ORDER BY idProduct, date_data")
         else:
             results = self.db.query("SELECT idProduct, avg1, avg1_foil FROM prices ORDER BY idProduct, date_data")
-
-        # Optimisation : pré-grouper les données pour éviter np.append
+        # Agrégation efficace des données par produit
         temp_dict = {}
         for row in results:
             product_id = row['idProduct']
             if product_id not in temp_dict:
                 temp_dict[product_id] = {'avg1': [], 'avg1_foil': []}
-            
             temp_dict[product_id]['avg1'].append(row['avg1'] if row['avg1'] is not None else 0)
             temp_dict[product_id]['avg1_foil'].append(row['avg1_foil'] if row['avg1_foil'] is not None else 0)
-        
-        # Convertir en numpy arrays une seule fois
+        # Conversion en numpy arrays
         self.series_dict = {}
         for product_id, data in temp_dict.items():
             self.series_dict[product_id] = {
                 'avg1': np.array(data['avg1'], dtype=np.float32),
                 'avg1_foil': np.array(data['avg1_foil'], dtype=np.float32)
             }
-        
-        # Nettoyage explicite
         del results, temp_dict
         return self.series_dict
     
     def learn(self):
-        """Entraîne le modèle RandomForest sur les données rassemblées.
-
-        Les séries sont transformées en un dataset global en utilisant une fenêtre glissante, les features sont normalisées, puis le modèle est entraîné.
-        Le modèle et le scaler sont ensuite sauvegardés pour une utilisation future.
-
-        Retourne True en cas de succès.
         """
+        Entraîne le modèle RandomForest sur les historiques de prix extraits.
+        - Génère les jeux de données d'apprentissage par fenêtre glissante sur les prix des cartes
+        - Normalise les features
+        - Entraîne le modèle
+        - Sauvegarde le modèle et le scaler sur disque
 
+        :return: True si l'entraînement a réussi, False sinon
+        """
         if( self.series_dict is None ):
             self.gatherData()
-
-        # Optimisation : calculer la taille totale nécessaire pour pré-allouer
+        # Calcul du nombre total d'échantillons pour pré-allocation
         total_samples = 0
         for serie in self.series_dict.values():
             for serie_values in serie.values():
                 if len(serie_values) > self.window_size:
                     total_samples += len(serie_values) - self.window_size
-        
         if total_samples == 0:
             return False
-            
-        # Pré-allocation des arrays pour éviter les copies
+        # Pré-allocation des tableaux numpy
         X_all = np.empty((total_samples, self.window_size), dtype=np.float32)
         y_all = np.empty(total_samples, dtype=np.float32)
-        
-        # Remplissage efficace des données
+        # Remplissage des tableaux par fenêtre glissante
         idx = 0
         for serie in self.series_dict.values():
             for serie_values in serie.values():
                 serie_len = len(serie_values)
                 if serie_len > self.window_size:
-                    # Utilisation de numpy slicing pour efficacité
                     for i in range(self.window_size, serie_len):
                         X_all[idx] = serie_values[i-self.window_size:i]
                         y_all[idx] = serie_values[i]
                         idx += 1
-
-        # Normalisation des features et entraînement du modèle
+        # Normalisation et apprentissage
         self.scaler_X.fit(X_all)
         X_all_scaled = self.scaler_X.transform(X_all)
         self.rf_model.fit(X_all_scaled, y_all)
-
-        # Nettoyage mémoire explicite
+        # Nettoyage mémoire
         del X_all, X_all_scaled, y_all
-
-        # Sauvegarde du modèle et du scaler pour réutilisation ultérieure
+        # Sauvegarde des objets
         joblib.dump(self.rf_model, self.temp_folder+"rf_model_mem.joblib")
         joblib.dump(self.scaler_X, self.temp_folder+"scaler_X.joblib")
+        
+        # Affichage du score de performance (Out-of-Bag)
+        # if hasattr(self.rf_model, 'oob_score_'):
+            # print(f"Score OOB du modèle : {self.rf_model.oob_score_:.4f}")
+        
         return True
 
     def predict(self):
-        """Réalise des prédictions sur chaque série en utilisant le modèle entraîné.
+        """
+        Prédit l'évolution future du prix de chaque carte Magic à l'aide du modèle entraîné.
+        - Utilise les derniers prix connus comme point de départ
+        - Prédit les prix futurs en chaîne (fenêtre glissante)
+        - Écrit les prévisions dans un fichier CSV (un par carte)
 
-        Pour chaque série et chaque type ('n' ou 'f'), les dernières valeurs sont utilisées pour générer une séquence de prédictions, qui est affichée dans la console.
-
-        Retourne True en cas de succès.
+        :return: True si la prédiction a réussi
         """
         if( self.series_dict is None ):
             self.gatherData(self.window_size)
-
         with open(self.temp_folder+"predicts.csv", "w", encoding="utf-8") as f_predicts:
             for product_id, series_type in self.series_dict.items():
-
                 datacsv = {}
-
                 for field, serie_values in series_type.items():
-                    # Optimisation : travailler directement avec numpy array
-                    # Utiliser une fenêtre glissante plutôt qu'une copie complète
+                    # Ignore les séries trop courtes
                     if len(serie_values) < self.window_size:
                         continue
-                        
-                    # Initialiser avec les dernières valeurs de la série
+                    # Démarre la prédiction avec la dernière fenêtre connue
                     current_window = serie_values[-self.window_size:].copy()
-                    
                     for i in range(self.nb_predictions):
                         if i not in datacsv:
                             datacsv[i] = { 
@@ -176,24 +182,27 @@ class predictopi:
                                 'date_data': self.maxDate + pd.Timedelta(days=i+1), 
                                 'idProduct': product_id 
                             }
-                    
-                        # Préparation des features - réutiliser le même array
+                        # Prépare les features et prédit la prochaine valeur
                         features_scaled = self.scaler_X.transform(current_window.reshape(1, -1))
-                        # Prédiction de la valeur suivante
                         pred = self.rf_model.predict(features_scaled)[0]
-                        datacsv[i][field] = float(pred)
-                        
-                        # Mise à jour efficace de la fenêtre glissante
+                        # Si la prédiction est négative ou nulle, on la considère comme absente
+                        if( pred <= 0 ):
+                            datacsv[i][field] = None
+                        else:
+                            datacsv[i][field] = float(pred)
+                        # Met à jour la fenêtre glissante
                         current_window = np.roll(current_window, -1)
                         current_window[-1] = pred
-                
-                #write datacsv to file
+                # Écrit les résultats dans le CSV
                 for data in datacsv.values():
                     f_predicts.write(common.csvify(data, ['id', 'date_data', 'avg1', 'avg1_foil', 'idProduct']))
-
         return True
 
     def insertPredictionsToDB(self):
-        print ("Not implemented yet")
-        db.query("TRUNCATE TABLE predicts")
-        db.import_csv_to_table("csvtemp/predicts.csv", self.temp_folder+"predicts", ";")
+        """
+        Insère les prévisions de prix générées dans la table prices_predict de la base de données.
+        - Vide la table cible
+        - Importe le fichier CSV généré dans la table
+        """
+        self.db.query("TRUNCATE TABLE prices_predict")
+        self.db.import_csv_to_table(self.temp_folder+"predicts.csv", "prices_predict", ";")
