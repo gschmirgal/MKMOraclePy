@@ -13,8 +13,9 @@ import numpy as np
 import pandas as pd
 from sklearn.discriminant_analysis import StandardScaler
 from sklearn.ensemble import RandomForestRegressor
-from . import common
-from . import db
+
+from src import common
+from src import db
 
 class predictopi:
     """
@@ -48,11 +49,23 @@ class predictopi:
         """
         config = configparser.ConfigParser()
         config.read('config.ini')
-        self.temp_folder = config.get('Folders', 'temp', fallback='./data/')
+        self.temp_folder        = config.get('Folders', 'temp', fallback='./data/')
+
+        self.n_estimators       = config.getint('IA', 'n_estimators', fallback=200)
+        self.max_depth          = config.getint('IA', 'max_depth', fallback=15)
+        self.min_samples_split  = config.getint('IA', 'min_samples_split', fallback=5)
+        self.min_samples_leaf   = config.getint('IA', 'min_samples_leaf', fallback=2)
+        self.max_features       = config.get(   'IA', 'max_features', fallback='sqrt')
+        self.n_jobs             = config.getint('IA', 'n_jobs', fallback=-1)
+        self.random_state       = config.getint('IA', 'random_state', fallback=42)
+
+        self.window_size        = config.getint('IA', 'window_size', fallback=7)
+        self.nb_predictions     = config.getint('IA', 'nb_predictions', fallback=10)
+
         self.db = db.dbMkmPy()
-        self.window_size = 4
-        self.nb_predictions = 7
+
         self.series_dict = None
+        
         # Chargement ou création du modèle/scaler
         if( not reset and 
            os.path.exists(self.temp_folder+"rf_model_mem.joblib") and 
@@ -63,14 +76,14 @@ class predictopi:
             self.scaler_X = StandardScaler()
             # Configuration optimisée pour la prédiction de prix de cartes Magic
             self.rf_model = RandomForestRegressor(
-                n_estimators=200,        # Plus d'arbres pour meilleure précision
-                max_depth=15,           # Limite la profondeur pour éviter le surapprentissage
-                min_samples_split=5,    # Réduit le surapprentissage sur petites séries
-                min_samples_leaf=2,     # Feuilles plus générales
-                max_features='sqrt',    # Utilise racine carrée du nombre de features
-                n_jobs=-1,              # Utilise tous les cœurs CPU
-                random_state=42,        # Reproductibilité
-                oob_score=True          # Score de validation interne
+                n_estimators = self.n_estimators,	        # Plus d'arbres pour meilleure précision
+                max_depth = self.max_depth,	                # Limite la profondeur pour éviter le surapprentissage
+                min_samples_split = self.min_samples_split,	# Réduit le surapprentissage sur petites séries
+                min_samples_leaf = self.min_samples_leaf,	# Feuilles plus générales
+                max_features = self.max_features,	        # Utilise racine carrée du nombre de features
+                n_jobs = self.n_jobs,	                    # Utilise tous les cœurs CPU
+                random_state = self.random_state	        # Reproductibilité
+
             )
 
     def gatherData(self, limit=None):
@@ -158,44 +171,64 @@ class predictopi:
     def predict(self):
         """
         Prédit l'évolution future du prix de chaque carte Magic à l'aide du modèle entraîné.
-        - Utilise les derniers prix connus comme point de départ
-        - Prédit les prix futurs en chaîne (fenêtre glissante)
-        - Écrit les prévisions dans un fichier CSV (un par carte)
+        Optimisation : prédiction en batch pour toutes les cartes et chaque type de prix, écriture du CSV en une seule fois.
 
         :return: True si la prédiction a réussi
         """
-        if( self.series_dict is None ):
+        if self.series_dict is None:
             self.gatherData(self.window_size)
+
+        # Initialisation des fenêtres pour chaque carte et type
+        last_windows = {}
+        for product_id, series_type in self.series_dict.items():
+            last_windows[product_id] = {}
+            for field, serie_values in series_type.items():
+                if len(serie_values) >= self.window_size:
+                    last_windows[product_id][field] = serie_values[-self.window_size:].copy()
+
+        # Préparation des résultats par jour
+        all_results = []
+        for i in range(self.nb_predictions):
+            # Préparation des features batch pour chaque type (normal et foil)
+            batch_features = []
+            batch_keys = []
+            batch_fields = []
+            for product_id, fields in last_windows.items():
+                for field, window in fields.items():
+                    batch_features.append(window)
+                    batch_keys.append(product_id)
+                    batch_fields.append(field)
+            if not batch_features:
+                break
+            X_batch = np.array(batch_features, dtype=np.float32)
+            X_batch_scaled = self.scaler_X.transform(X_batch)
+            preds = self.rf_model.predict(X_batch_scaled)
+
+            # Mise à jour des fenêtres et stockage des résultats
+            result_dict = {}
+            for idx, (product_id, field) in enumerate(zip(batch_keys, batch_fields)):
+                pred = preds[idx]
+                if product_id not in result_dict:
+                    result_dict[product_id] = {
+                        'id': '0',
+                        'date_data': self.maxDate + pd.Timedelta(days=i+1),
+                        'idProduct': product_id
+                    }
+                # Si la prédiction est négative ou nulle, on la considère comme absente
+                if pred <= 0:
+                    result_dict[product_id][field] = None
+                else:
+                    result_dict[product_id][field] = float(pred)
+                # Mise à jour de la fenêtre pour la prochaine itération
+                last_windows[product_id][field] = np.roll(last_windows[product_id][field], -1)
+                last_windows[product_id][field][-1] = pred
+            # Ajoute tous les résultats de ce jour
+            all_results.extend(result_dict.values())
+
+        # Écriture groupée du CSV
         with open(self.temp_folder+"predicts.csv", "w", encoding="utf-8") as f_predicts:
-            for product_id, series_type in self.series_dict.items():
-                datacsv = {}
-                for field, serie_values in series_type.items():
-                    # Ignore les séries trop courtes
-                    if len(serie_values) < self.window_size:
-                        continue
-                    # Démarre la prédiction avec la dernière fenêtre connue
-                    current_window = serie_values[-self.window_size:].copy()
-                    for i in range(self.nb_predictions):
-                        if i not in datacsv:
-                            datacsv[i] = { 
-                                'id': '0', 
-                                'date_data': self.maxDate + pd.Timedelta(days=i+1), 
-                                'idProduct': product_id 
-                            }
-                        # Prépare les features et prédit la prochaine valeur
-                        features_scaled = self.scaler_X.transform(current_window.reshape(1, -1))
-                        pred = self.rf_model.predict(features_scaled)[0]
-                        # Si la prédiction est négative ou nulle, on la considère comme absente
-                        if( pred <= 0 ):
-                            datacsv[i][field] = None
-                        else:
-                            datacsv[i][field] = float(pred)
-                        # Met à jour la fenêtre glissante
-                        current_window = np.roll(current_window, -1)
-                        current_window[-1] = pred
-                # Écrit les résultats dans le CSV
-                for data in datacsv.values():
-                    f_predicts.write(common.csvify(data, ['id', 'date_data', 'avg1', 'avg1_foil', 'idProduct']))
+            for data in all_results:
+                f_predicts.write(common.csvify(data, ['id', 'date_data', 'avg1', 'avg1_foil', 'idProduct']))
         return True
 
     def insertPredictionsToDB(self):

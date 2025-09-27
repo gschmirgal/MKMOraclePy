@@ -67,7 +67,20 @@ cp config.ini.sample config.ini
 # Éditer config.ini avec vos paramètres de base de données
 ```
 
+## 🛠️ Mise à jour de la base de données
+
+Si votre base n'est pas gérée automatiquement par l'ORM du front, vous pouvez utiliser le fichier `update from mkmpy.sql` pour mettre à jour la structure ou les données de la base MySQL.
+
+- Ce fichier contient les requêtes SQL nécessaires pour adapter la base aux besoins du projet MKMOraclePi.
+- À exécuter manuellement via un client MySQL ou un outil d'administration si besoin.
+- Exemple d'utilisation :
+
+```bash
+mysql -u <user> -p <database> < "update from mkmpy.sql"
+```
+
 **Structure de la base de données attendue :**
+
 ```sql
 -- Table des prix historiques
 CREATE TABLE prices (
@@ -126,14 +139,36 @@ Le fichier `config.ini` contient les paramètres suivants :
 
 ```ini
 [Database]
-host     = localhost        # Serveur MySQL
-user     = username        # Utilisateur DB
-password = password        # Mot de passe
-database = mkmpy          # Nom de la base
-port     = 3306           # Port MySQL
+# Adresse du serveur MySQL (ex: localhost ou IP)
+host     = yourhost
+# Nom d'utilisateur MySQL
+user     = user
+# Mot de passe MySQL
+password = pwd
+# Nom de la base de données à utiliser
+database = mkmpy
+# Port MySQL (par défaut 3306)
+port     = 3306
 
 [Folders]
-temp = ./data/            # Dossier temporaire
+# Dossier temporaire pour stocker les modèles et fichiers intermédiaires
+temp       = ./data/
+
+[IA]
+# Nombre d'arbres dans la forêt
+n_estimators=200
+# Profondeur maximale des arbres
+max_depth=15
+# Nombre minimum d'échantillons requis pour diviser un noeud
+min_samples_split=5
+# Nombre minimum d'échantillons requis pour être à une feuille
+min_samples_leaf=2
+# Nombre de caractéristiques à considérer lors de la recherche de la meilleure séparation
+max_features='sqrt'
+# Nombre de cœurs CPU à utiliser (-1 pour tous les cœurs)
+n_jobs=-1
+# État aléatoire pour la reproductibilité des résultats
+random_state=42
 ```
 
 ## 🧠 **Modèle de Machine Learning**
@@ -149,6 +184,30 @@ temp = ./data/            # Dossier temporaire
 - Utilisation de `float32` au lieu de `float64`
 - Nettoyage explicite des variables temporaires
 - Fenêtre glissante efficace avec `np.roll()`
+
+## 🚀 Optimisations récentes
+
+### Prédiction en batch
+- La méthode `predict` utilise désormais la prédiction en batch pour accélérer le calcul sur de grandes quantités de cartes.
+- Les features de toutes les cartes à prédire pour chaque jour sont regroupées et traitées en une seule opération, exploitant le parallélisme interne de scikit-learn.
+- Le CSV de sortie est écrit en une seule fois pour limiter les accès disque.
+
+### Gains de performance
+- Temps de prédiction fortement réduit, surtout pour les gros volumes de données.
+- Moins d'overhead Python, meilleure utilisation du CPU.
+- Optimisation mémoire conservée (pré-allocation, float32, nettoyage explicite).
+
+## 🆕 Exemple d'utilisation optimisée
+
+```python
+from src.predictopi import predictopi
+
+predictor = predictopi(reset=False)
+predictor.gatherData(limit=7)
+predictor.learn()
+predictor.predict()  # Prédiction accélérée en batch
+predictor.insertPredictionsToDB()
+```
 
 ## 📊 **Données de sortie**
 
@@ -174,33 +233,15 @@ class predictopi:
     def insertPredictionsToDB(self)      # Insertion en base
 ```
 
-### Tests et débogage
-```bash
-# Activer l'environnement virtuel
-.venv\Scripts\activate
-
-# Lancer en mode debug
-python -m pdb launch_learn.py
-```
-
 ## 📈 **Performance**
 
 - **Optimisation mémoire** : -50% d'usage grâce aux optimisations numpy
 - **Vitesse** : Pré-allocation des arrays pour éviter les copies
 - **Persistance** : Sauvegarde automatique des modèles entraînés
 
-## 🤝 **Contribution**
-
-Les contributions sont les bienvenues ! N'hésitez pas à :
-1. Fork le projet
-2. Créer une branche feature (`git checkout -b feature/amazing-feature`)
-3. Commit vos changements (`git commit -m 'Add amazing feature'`)
-4. Push vers la branche (`git push origin feature/amazing-feature`)
-5. Ouvrir une Pull Request
-
 ## 📄 **Licence**
 
-Ce projet est sous licence MIT. Voir le fichier `LICENSE` pour plus de détails.
+Ce projet est sous licence MIT.
 
 ## 🛠️ **Stack Technique**
 
@@ -210,5 +251,3 @@ Ce projet est sous licence MIT. Voir le fichier `LICENSE` pour plus de détails.
 - **scikit-learn** - Machine Learning (RandomForest, StandardScaler)
 - **joblib** - Sérialisation des modèles
 - **MySQL** - Base de données
-
----

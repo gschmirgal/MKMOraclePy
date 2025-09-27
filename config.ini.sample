@@ -1,9 +1,34 @@
+# Exemple de configuration pour MKMOraclePi
+# Les lignes commençant par '#' sont des commentaires et ne sont pas prises en compte.
+
 [Database]
+# Adresse du serveur MySQL (ex: localhost ou IP)
 host     = yourhost
+# Nom d'utilisateur MySQL
 user     = user
+# Mot de passe MySQL
 password = pwd
+# Nom de la base de données à utiliser
 database = mkmpy
+# Port MySQL (par défaut 3306)
 port     = 3306
 
 [Folders]
+# Dossier temporaire pour stocker les modèles et fichiers intermédiaires
 temp       = ./data/
+
+[IA]
+# Nombre d'arbres dans la forêt
+n_estimators=200
+# Profondeur maximale des arbres
+max_depth=15
+# Nombre minimum d'échantillons requis pour diviser un noeud
+min_samples_split=5
+# Nombre minimum d'échantillons requis pour être à une feuille
+min_samples_leaf=2
+# Nombre de caractéristiques à considérer lors de la recherche de la meilleure séparation
+max_features='sqrt'
+# Nombre de cœurs CPU à utiliser (-1 pour tous les cœurs)
+n_jobs=-1
+# État aléatoire pour la reproductibilité des résultats
+random_state=42
