@@ -26,6 +26,20 @@ INSERT IGNORE INTO `logsteps` (`id`, `step`) VALUES
 	(10, 'ongoing'),
 	(50, 'finished'),
 	(90, 'too early');
+	
+-- Listage des données de la table mkmpy2.prices_predict : ~0 rows (environ)
+
+-- Listage de la structure de table mkmpy2. taskstypes
+CREATE TABLE IF NOT EXISTS `taskstypes` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `task` varchar(15) COLLATE utf8mb4_unicode_ci NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=21 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Listage des données de la table mkmpy2.taskstypes : ~2 rows (environ)
+INSERT IGNORE INTO `taskstypes` (`id`, `task`) VALUES
+	(10, 'learn'),
+	(20, 'predict');
 
 -- Listage de la structure de table mkmpy2. logs_oracle
 CREATE TABLE IF NOT EXISTS `logs_oracle` (
@@ -53,20 +67,6 @@ CREATE TABLE IF NOT EXISTS `prices_predict` (
   KEY `IDX_FEFDEDC5C3F36F5F` (`idProduct`),
   CONSTRAINT `FK_FEFDEDC5C3F36F5F` FOREIGN KEY (`idProduct`) REFERENCES `products` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- Listage des données de la table mkmpy2.prices_predict : ~0 rows (environ)
-
--- Listage de la structure de table mkmpy2. taskstypes
-CREATE TABLE IF NOT EXISTS `taskstypes` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `task` varchar(15) COLLATE utf8mb4_unicode_ci NOT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=21 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- Listage des données de la table mkmpy2.taskstypes : ~2 rows (environ)
-INSERT IGNORE INTO `taskstypes` (`id`, `task`) VALUES
-	(10, 'learn'),
-	(20, 'predict');
 
 /*!40103 SET TIME_ZONE=IFNULL(@OLD_TIME_ZONE, 'system') */;
 /*!40101 SET SQL_MODE=IFNULL(@OLD_SQL_MODE, '') */;
