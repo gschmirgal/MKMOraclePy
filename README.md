@@ -1,9 +1,9 @@
 # 🔮 MKMOraclePi - Prédicteur de Prix Cardmarket
 
-![Python](https://img.shields.io/badge/python-v3.11+-blue.svg)
-![MySQL](https://img.shields.io/badge/MySQL-8.0+-orange.svg)
-![Machine Learning](https://img.shields.io/badge/ML-RandomForest-green.svg)
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.8+-blue?style=for-the-badge&logo=python&logoColor=white)
+![MySQL](https://img.shields.io/badge/MySQL-5.7+-orange?style=for-the-badge&logo=mysql&logoColor=white)
+![Machine Learning](https://img.shields.io/badge/ML-RandomForest-green.svg?style=for-the-badge)
+![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
 
 **MKMOraclePi** est un système de prédiction intelligent qui analyse et prédit l'évolution des prix des cartes Magic: The Gathering vendues sur le marketplace Cardmarket.
 
