@@ -6,7 +6,6 @@
 # Il permet de charger les historiques de prix, d'entraîner un modèle de machine learning (RandomForest) sur ces séries temporelles,
 # puis de prédire l'évolution future des prix pour chaque carte, et d'insérer ces prévisions en base de données.
 
-import configparser
 import os
 import joblib
 import numpy as np
@@ -47,8 +46,7 @@ class predictopi:
 
         :param reset: Si True, force la réinitialisation du modèle et du scaler
         """
-        config = configparser.ConfigParser()
-        config.read('config.ini')
+        config = common.getconfigfile()
         self.temp_folder        = config.get('Folders', 'temp', fallback='./data/')
 
         self.n_estimators       = config.getint('IA', 'n_estimators', fallback=200)

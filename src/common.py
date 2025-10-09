@@ -1,4 +1,6 @@
+import configparser
 import datetime
+import os
 
 
 def csvify(values, format):
@@ -15,3 +17,14 @@ def csvify(values, format):
             csvline += f'"{str(values[key]).replace("\"", "\"\"")}";'
     return f'{csvline}\n'
 
+def getconfigfile():
+    if os.path.exists("../config.ini"):
+        config_file = "../config.ini"
+    else:
+        config_file = "config.ini"
+        
+    config = configparser.ConfigParser()
+
+    # Read the configuration file
+    config.read(config_file)
+    return config  # Retourner l'objet config, pas le résultat de read()
