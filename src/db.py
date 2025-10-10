@@ -2,13 +2,12 @@ import mysql.connector
 import src.common as common
 
 class MySQLConnectionManager:
-    def __init__(self, host, user, password, database, temp= "./", port=3306):
+    def __init__(self, host, user, password, database, port=3306):
         self.host = host
         self.user = user
         self.password = password
         self.database = database
         self.port = port
-        self.temp = temp
         self.connection = None
 
     def connect(self):
@@ -51,7 +50,7 @@ class MySQLConnectionManager:
 
     def import_csv_to_table(self, csv_file_path, table_name, delimiter=','):
         query = (
-            f"LOAD DATA LOCAL INFILE '{self.temp+csv_file_path}' "
+            f"LOAD DATA LOCAL INFILE '{csv_file_path}' "
             "IGNORE "
             f"INTO TABLE {table_name} "
             f"FIELDS TERMINATED BY '{delimiter}' "
@@ -81,6 +80,5 @@ class dbMkmPy(MySQLConnectionManager):
             user=config_db['user'],
             password=config_db['password'],
             database=config_db['database'],
-            port=config_db['port'],
-            temp=config['Folders']['temp']
+            port=config_db['port']
         )
