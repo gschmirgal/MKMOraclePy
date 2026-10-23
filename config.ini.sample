@@ -36,3 +36,6 @@ random_state=42
 window_size=7
 # Nombre de jours à prédire
 nb_predictions=10
+# Nombre de jours d'historique utilisés pour l'apprentissage (commenté : tout l'historique)
+# À réduire si l'apprentissage manque de mémoire
+#learn_days=365

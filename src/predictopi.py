@@ -10,6 +10,7 @@ import os
 import joblib
 import numpy as np
 import pandas as pd
+from numpy.lib.stride_tricks import sliding_window_view
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestRegressor
 
@@ -59,6 +60,7 @@ class predictopi:
 
         self.window_size        = config.getint('IA', 'window_size', fallback=7)
         self.nb_predictions     = config.getint('IA', 'nb_predictions', fallback=10)
+        self.learn_days         = config.getint('IA', 'learn_days', fallback=None)
 
         self.db = db.dbMkmPy()
 
@@ -95,27 +97,44 @@ class predictopi:
         :return: Dictionnaire {idCarte: {'avg1': array, 'avg1_foil': array}}
         """
         self.maxDate = self.db.get1value("SELECT MAX(date_data) FROM prices")
+        sql = "SELECT idProduct, avg1, avg1_foil FROM prices"
         if( limit is not None ):
-            results = self.db.query(f"SELECT idProduct, avg1, avg1_foil FROM prices WHERE date_data >= DATE_SUB('{self.maxDate}', INTERVAL {limit} DAY) ORDER BY idProduct, date_data")
-        else:
-            results = self.db.query("SELECT idProduct, avg1, avg1_foil FROM prices ORDER BY idProduct, date_data")
-        # Agrégation efficace des données par produit
-        temp_dict = {}
-        for row in results:
-            product_id = row['idProduct']
-            if product_id not in temp_dict:
-                temp_dict[product_id] = {'avg1': [], 'avg1_foil': []}
-            temp_dict[product_id]['avg1'].append(row['avg1'] if row['avg1'] is not None else 0)
-            temp_dict[product_id]['avg1_foil'].append(row['avg1_foil'] if row['avg1_foil'] is not None else 0)
-        # Conversion en numpy arrays
+            sql += f" WHERE date_data >= DATE_SUB('{self.maxDate}', INTERVAL {limit} DAY)"
+        sql += " ORDER BY idProduct, date_data"
+        # Lecture en flux, carte par carte (les lignes arrivent triées par idProduct) :
+        # seules les séries numpy finales restent en mémoire, pas le résultat complet de la requête
         self.series_dict = {}
-        for product_id, data in temp_dict.items():
-            self.series_dict[product_id] = {
-                'avg1': np.array(data['avg1'], dtype=np.float32),
-                'avg1_foil': np.array(data['avg1_foil'], dtype=np.float32)
-            }
-        del results, temp_dict
+        current_id = None
+        avg1, avg1_foil = [], []
+        for product_id, price, price_foil in self.db.iterate(sql):
+            if product_id != current_id:
+                self._storeSerie(current_id, avg1, avg1_foil)
+                current_id, avg1, avg1_foil = product_id, [], []
+            avg1.append(price if price is not None else 0)
+            avg1_foil.append(price_foil if price_foil is not None else 0)
+        self._storeSerie(current_id, avg1, avg1_foil)
         return self.series_dict
+
+    def _storeSerie(self, product_id, avg1, avg1_foil):
+        if product_id is not None:
+            self.series_dict[product_id] = {
+                'avg1': np.array(avg1, dtype=np.float32),
+                'avg1_foil': np.array(avg1_foil, dtype=np.float32)
+            }
+
+    def _trainingSamples(self):
+        """
+        Fenêtres glissantes de chaque série et prix du jour suivant.
+        Les échantillons entièrement à 0 (prix absent, ex. carte sans version foil) sont écartés :
+        ils n'apprennent rien et représentent une grande partie des séries.
+        """
+        for serie in self.series_dict.values():
+            for serie_values in serie.values():
+                if len(serie_values) > self.window_size:
+                    windows = sliding_window_view(serie_values[:-1], self.window_size)
+                    targets = serie_values[self.window_size:]
+                    keep = windows.any(axis=1) | (targets != 0)
+                    yield windows[keep], targets[keep]
     
     def learn(self, save=True):
         """
@@ -129,13 +148,9 @@ class predictopi:
         :return: True si l'entraînement a réussi, False sinon
         """
         if( self.series_dict is None ):
-            self.gatherData()
+            self.gatherData(self.learn_days)
         # Calcul du nombre total d'échantillons pour pré-allocation
-        total_samples = 0
-        for serie in self.series_dict.values():
-            for serie_values in serie.values():
-                if len(serie_values) > self.window_size:
-                    total_samples += len(serie_values) - self.window_size
+        total_samples = sum(len(targets) for _, targets in self._trainingSamples())
         if total_samples == 0:
             return False
         # Pré-allocation des tableaux numpy
@@ -143,20 +158,16 @@ class predictopi:
         y_all = np.empty(total_samples, dtype=np.float32)
         # Remplissage des tableaux par fenêtre glissante
         idx = 0
-        for serie in self.series_dict.values():
-            for serie_values in serie.values():
-                serie_len = len(serie_values)
-                if serie_len > self.window_size:
-                    for i in range(self.window_size, serie_len):
-                        X_all[idx] = serie_values[i-self.window_size:i]
-                        y_all[idx] = serie_values[i]
-                        idx += 1
-        # Normalisation et apprentissage
+        for windows, targets in self._trainingSamples():
+            X_all[idx:idx+len(targets)] = windows
+            y_all[idx:idx+len(targets)] = targets
+            idx += len(targets)
+        # Normalisation (en place, sans copie du jeu d'apprentissage) et apprentissage
         self.scaler_X.fit(X_all)
-        X_all_scaled = self.scaler_X.transform(X_all)
-        self.rf_model.fit(X_all_scaled, y_all)
+        X_all = self.scaler_X.transform(X_all, copy=False)
+        self.rf_model.fit(X_all, y_all)
         # Nettoyage mémoire
-        del X_all, X_all_scaled, y_all
+        del X_all, y_all
         # Sauvegarde des objets
         if save:
             joblib.dump(self.rf_model, self.temp_folder+"rf_model_mem.joblib")
@@ -196,11 +207,12 @@ class predictopi:
             self.gatherData(self.window_size)
 
         # Dernière fenêtre de chaque carte et type (normal et foil)
+        # Une fenêtre entièrement à 0 (prix absent) n'est pas prédite : le modèle n'apprend pas sur ces cas
         batch_keys = []
         batch_windows = []
         for product_id, series_type in self.series_dict.items():
             for field, serie_values in series_type.items():
-                if len(serie_values) >= self.window_size:
+                if len(serie_values) >= self.window_size and serie_values[-self.window_size:].any():
                     batch_keys.append((product_id, field))
                     batch_windows.append(serie_values[-self.window_size:])
 
@@ -216,7 +228,9 @@ class predictopi:
                         result_dict[product_id] = {
                             'id': '0',
                             'date_data': self.maxDate + pd.Timedelta(days=i+1),
-                            'idProduct': product_id
+                            'idProduct': product_id,
+                            'avg1': None,
+                            'avg1_foil': None
                         }
                     # Si la prédiction est négative ou nulle, on la considère comme absente
                     if pred <= 0:

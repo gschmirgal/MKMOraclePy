@@ -77,6 +77,7 @@ Le fichier `config.ini` est cherché dans le dossier parent du dossier courant (
 | `Folders` | `temp` | `./data/` | Dossier du modèle sauvegardé et du CSV de prévisions |
 | `IA` | `window_size` | `7` | Nombre de jours de prix en entrée du modèle |
 | `IA` | `nb_predictions` | `10` | Nombre de jours prédits |
+| `IA` | `learn_days` | tout l'historique | Nombre de jours d'historique utilisés pour l'apprentissage, à réduire si la mémoire manque |
 | `IA` | `n_estimators` | `200` | Nombre d'arbres |
 | `IA` | `max_depth` | `15` | Profondeur maximale des arbres |
 | `IA` | `min_samples_split` | `5` | Échantillons minimum pour diviser un nœud |
@@ -90,8 +91,8 @@ Après un changement de `window_size`, il faut relancer `launch_learn.py` : le m
 ## Fonctionnement
 
 1. **Données** : pour chaque carte, la série des prix moyens `avg1` (normal) et `avg1_foil` (foil) est lue dans `prices`, triée par date. Un prix absent (`NULL`) est remplacé par 0.
-2. **Apprentissage** : chaque série est découpée en fenêtres glissantes de `window_size` jours. Le modèle apprend à prédire le prix du jour suivant à partir d'une fenêtre. Un seul modèle est entraîné pour toutes les cartes, normales et foil confondues.
-3. **Prédiction** : le modèle prédit J+1 à partir des derniers jours connus, réinjecte cette prévision dans la fenêtre pour prédire J+2, et ainsi de suite jusqu'à `nb_predictions`. Une prévision négative ou nulle est enregistrée comme `NULL`.
+2. **Apprentissage** : chaque série est découpée en fenêtres glissantes de `window_size` jours. Le modèle apprend à prédire le prix du jour suivant à partir d'une fenêtre. Un seul modèle est entraîné pour toutes les cartes, normales et foil confondues. Les fenêtres entièrement à 0 (par exemple une carte sans version foil) sont écartées.
+3. **Prédiction** : le modèle prédit J+1 à partir des derniers jours connus, réinjecte cette prévision dans la fenêtre pour prédire J+2, et ainsi de suite jusqu'à `nb_predictions`. Une prévision négative ou nulle, ou une série dont les derniers jours sont tous à 0, est enregistrée comme `NULL`.
 4. **Écriture** : les prévisions sont écrites dans `<temp>/predicts.csv`, puis la table `prices_predict` est vidée et rechargée depuis ce fichier.
 
 Fichiers produits dans le dossier `temp` :

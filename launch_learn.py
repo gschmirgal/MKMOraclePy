@@ -13,7 +13,7 @@ try:
     log.setStatus("ongoing")
     ia = predictopi(reset=False)
     # Collecte des données avec limite pour réduire l'usage mémoire
-    ia.gatherData()
+    ia.gatherData(ia.learn_days)
     ia.learn()
     log.setStatus("finished")
 

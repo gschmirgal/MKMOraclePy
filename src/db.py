@@ -42,6 +42,20 @@ class MySQLConnectionManager:
         finally:
             cursor.close()
 
+    def iterate(self, query, params=None, batch_size=10000):
+        # Parcourt le résultat par lots (tuples), sans charger toutes les lignes en mémoire
+        conn = self.connect()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(query, params or ())
+            while True:
+                rows = cursor.fetchmany(batch_size)
+                if not rows:
+                    break
+                yield from rows
+        finally:
+            cursor.close()
+
     def __enter__(self):
         return self
 
