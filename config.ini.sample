@@ -27,8 +27,12 @@ min_samples_split=5
 # Nombre minimum d'échantillons requis pour être à une feuille
 min_samples_leaf=2
 # Nombre de caractéristiques à considérer lors de la recherche de la meilleure séparation
-max_features='sqrt'
+max_features=sqrt
 # Nombre de cœurs CPU à utiliser (-1 pour tous les cœurs)
 n_jobs=-1
 # État aléatoire pour la reproductibilité des résultats
 random_state=42
+# Taille de la fenêtre glissante (nombre de jours de prix en entrée du modèle)
+window_size=7
+# Nombre de jours à prédire
+nb_predictions=10

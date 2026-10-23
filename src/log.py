@@ -55,3 +55,7 @@ class log:
 
         sql = f"UPDATE logs_oracle SET idStep = '{self.statusesFlip[self.status]}' WHERE id = {self.id}"
         self.db.query(sql)
+
+    def setFailed(self):
+        # Retombe sur "finished" si le statut "failed" n'a pas encore été ajouté en base
+        self.setStatus("failed" if "failed" in self.statuses.values() else "finished")

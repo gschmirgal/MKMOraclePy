@@ -10,7 +10,7 @@ import os
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.discriminant_analysis import StandardScaler
+from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestRegressor
 
 from src import common
@@ -117,7 +117,7 @@ class predictopi:
         del results, temp_dict
         return self.series_dict
     
-    def learn(self):
+    def learn(self, save=True):
         """
         Entraîne le modèle RandomForest sur les historiques de prix extraits.
         - Génère les jeux de données d'apprentissage par fenêtre glissante sur les prix des cartes
@@ -125,6 +125,7 @@ class predictopi:
         - Entraîne le modèle
         - Sauvegarde le modèle et le scaler sur disque
 
+        :param save: Si False, le modèle n'est pas écrit sur disque (utile pour l'évaluation)
         :return: True si l'entraînement a réussi, False sinon
         """
         if( self.series_dict is None ):
@@ -157,14 +158,32 @@ class predictopi:
         # Nettoyage mémoire
         del X_all, X_all_scaled, y_all
         # Sauvegarde des objets
-        joblib.dump(self.rf_model, self.temp_folder+"rf_model_mem.joblib")
-        joblib.dump(self.scaler_X, self.temp_folder+"scaler_X.joblib")
+        if save:
+            joblib.dump(self.rf_model, self.temp_folder+"rf_model_mem.joblib")
+            joblib.dump(self.scaler_X, self.temp_folder+"scaler_X.joblib")
         
         # Affichage du score de performance (Out-of-Bag)
         # if hasattr(self.rf_model, 'oob_score_'):
             # print(f"Score OOB du modèle : {self.rf_model.oob_score_:.4f}")
         
         return True
+
+    def forecast(self, windows, steps):
+        """
+        Prédiction récursive en batch : chaque jour prédit est réinjecté dans la fenêtre
+        pour prédire le jour suivant.
+
+        :param windows: Fenêtres de prix, forme (n, window_size)
+        :param steps: Nombre de jours à prédire
+        :return: Tableau numpy des prédictions, forme (n, steps)
+        """
+        windows = np.array(windows, dtype=np.float32)
+        preds = np.empty((len(windows), steps))
+        for i in range(steps):
+            preds[:, i] = self.rf_model.predict(self.scaler_X.transform(windows))
+            windows = np.roll(windows, -1, axis=1)
+            windows[:, -1] = preds[:, i]
+        return preds
 
     def predict(self):
         """
@@ -176,52 +195,36 @@ class predictopi:
         if self.series_dict is None:
             self.gatherData(self.window_size)
 
-        # Initialisation des fenêtres pour chaque carte et type
-        last_windows = {}
+        # Dernière fenêtre de chaque carte et type (normal et foil)
+        batch_keys = []
+        batch_windows = []
         for product_id, series_type in self.series_dict.items():
-            last_windows[product_id] = {}
             for field, serie_values in series_type.items():
                 if len(serie_values) >= self.window_size:
-                    last_windows[product_id][field] = serie_values[-self.window_size:].copy()
+                    batch_keys.append((product_id, field))
+                    batch_windows.append(serie_values[-self.window_size:])
 
         # Préparation des résultats par jour
         all_results = []
-        for i in range(self.nb_predictions):
-            # Préparation des features batch pour chaque type (normal et foil)
-            batch_features = []
-            batch_keys = []
-            batch_fields = []
-            for product_id, fields in last_windows.items():
-                for field, window in fields.items():
-                    batch_features.append(window)
-                    batch_keys.append(product_id)
-                    batch_fields.append(field)
-            if not batch_features:
-                break
-            X_batch = np.array(batch_features, dtype=np.float32)
-            X_batch_scaled = self.scaler_X.transform(X_batch)
-            preds = self.rf_model.predict(X_batch_scaled)
-
-            # Mise à jour des fenêtres et stockage des résultats
-            result_dict = {}
-            for idx, (product_id, field) in enumerate(zip(batch_keys, batch_fields)):
-                pred = preds[idx]
-                if product_id not in result_dict:
-                    result_dict[product_id] = {
-                        'id': '0',
-                        'date_data': self.maxDate + pd.Timedelta(days=i+1),
-                        'idProduct': product_id
-                    }
-                # Si la prédiction est négative ou nulle, on la considère comme absente
-                if pred <= 0:
-                    result_dict[product_id][field] = None
-                else:
-                    result_dict[product_id][field] = float(pred)
-                # Mise à jour de la fenêtre pour la prochaine itération
-                last_windows[product_id][field] = np.roll(last_windows[product_id][field], -1)
-                last_windows[product_id][field][-1] = pred
-            # Ajoute tous les résultats de ce jour
-            all_results.extend(result_dict.values())
+        if batch_windows:
+            preds = self.forecast(batch_windows, self.nb_predictions)
+            for i in range(self.nb_predictions):
+                result_dict = {}
+                for idx, (product_id, field) in enumerate(batch_keys):
+                    pred = preds[idx, i]
+                    if product_id not in result_dict:
+                        result_dict[product_id] = {
+                            'id': '0',
+                            'date_data': self.maxDate + pd.Timedelta(days=i+1),
+                            'idProduct': product_id
+                        }
+                    # Si la prédiction est négative ou nulle, on la considère comme absente
+                    if pred <= 0:
+                        result_dict[product_id][field] = None
+                    else:
+                        result_dict[product_id][field] = float(pred)
+                # Ajoute tous les résultats de ce jour
+                all_results.extend(result_dict.values())
 
         # Écriture groupée du CSV
         with open(self.temp_folder+"predicts.csv", "w", encoding="utf-8") as f_predicts:

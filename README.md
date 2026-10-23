@@ -1,253 +1,133 @@
-# 🔮 MKMOraclePi - Prédicteur de Prix Cardmarket
+# MKMOraclePi
 
-![Python](https://img.shields.io/badge/Python-3.11+-blue?style=for-the-badge&logo=python&logoColor=white)
-![MySQL](https://img.shields.io/badge/MySQL-5.7+-orange?style=for-the-badge&logo=mysql&logoColor=white)
-![Machine Learning](https://img.shields.io/badge/ML-RandomForest-green.svg?style=for-the-badge)
-![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
+![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)
+![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?logo=mysql&logoColor=white)
+![scikit-learn](https://img.shields.io/badge/scikit--learn-RandomForest-F7931E?logo=scikitlearn&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-yellow)
 
-**MKMOraclePi** est un système de prédiction intelligent qui analyse et prédit l'évolution des prix des cartes Magic: The Gathering vendues sur le marketplace Cardmarket.
+Prédiction des prix des cartes Magic: The Gathering vendues sur Cardmarket.
 
-## 🎯 **Objectif**
+MKMOraclePi lit l'historique des prix en base, entraîne un modèle RandomForest et écrit les prix prévus pour les prochains jours dans la table `prices_predict`.
 
-Ce projet utilise des techniques de machine learning (RandomForest) pour analyser les historiques de prix et prédire les tendances futures des cartes Magic, permettant aux collectionneurs et investisseurs de prendre des décisions éclairées.
+## Place dans l'écosystème
 
-## ✨ **Fonctionnalités**
+MKMOraclePi est l'un des trois projets de la stack, assemblés par [dockermkmpy](https://github.com/gschmirgal/dockermkmpy) :
 
-- 📊 **Collecte de données** : Extraction des historiques de prix depuis une base de données
-- 🤖 **Intelligence Artificielle** : Modèle RandomForest optimisé pour les séries temporelles
-- 📈 **Prédictions** : Prévision des prix sur 7 jours (normal et foil)
-- 💾 **Persistance** : Sauvegarde automatique des modèles entraînés
-- 🗄️ **Base de données** : Insertion automatique des prédictions en base
-- ⚡ **Optimisé mémoire** : Gestion efficace des grandes séries temporelles
+| Projet | Rôle |
+|---|---|
+| [mkmpy](https://github.com/gschmirgal/mkmpy) | Importe chaque jour les prix Cardmarket dans la table `prices` |
+| **MKMOraclePi** | Apprend sur `prices` et écrit les prévisions dans `prices_predict` |
+| [frontMkmPy](https://github.com/gschmirgal/frontMkmPy) | Affiche les prix et les prévisions ; gère le schéma de la base (migrations Doctrine) |
 
-## 🏗️ **Architecture**
+Pour un déploiement complet, passer par **dockermkmpy**. La suite décrit une installation autonome.
 
-```
-MKMOraclePi/
-├── src/
-│   ├── predictopi.py    # Classe principale de prédiction
-│   ├── common.py        # Fonctions utilitaires
-│   └── db.py           # Gestion de la base de données
-├── data/               # Dossier temporaire (modèles, CSV)
-├── launch_learn.py     # Script d'entraînement
-├── launch_predict.py   # Script de prédiction
-├── config.ini          # Configuration (DB, chemins)
-└── requirements.txt    # Dépendances Python
-```
+## Installation
 
-## 🚀 **Installation**
+Prérequis :
 
-### Prérequis
-- Python 3.11+
-- MySQL 8.0+
-- Historique de prix des cartes Magic dans une base de données
+- Python 3.12 ou plus récent
+- Une base MySQL 8.0 déjà alimentée par mkmpy, avec `local_infile` activé côté serveur (les prévisions sont importées par `LOAD DATA LOCAL INFILE`)
 
-### 1. Cloner le projet
 ```bash
-git clone https://github.com/gschmirgal/MKMOraclePi.git
-cd MKMOraclePi
-```
-
-### 2. Créer l'environnement virtuel
-```bash
-python -m venv .venv
-.venv\Scripts\activate  # Windows
-# ou
-source .venv/bin/activate  # Linux/Mac
-```
-
-### 3. Installer les dépendances
-```bash
+git clone https://github.com/gschmirgal/MKMOraclePy.git
+cd MKMOraclePy
+python3 -m venv .venv
+source .venv/bin/activate        # Windows : .venv\Scripts\activate
 pip install -r requirements.txt
+cp config.ini.sample config.ini  # puis renseigner la section [Database]
 ```
 
-### 4. Configuration
-```bash
-cp config.ini.sample config.ini
-# Éditer config.ini avec vos paramètres de base de données
-```
-
-## 🛠️ Mise à jour de la base de données
-
-Si votre base n'est pas gérée automatiquement par l'ORM du front, vous pouvez utiliser le fichier `update from mkmpy.sql` pour mettre à jour la structure ou les données de la base MySQL.
-
-- Ce fichier contient les requêtes SQL nécessaires pour adapter la base aux besoins du projet MKMOraclePi.
-- À exécuter manuellement via un client MySQL ou un outil d'administration si besoin.
-- Exemple d'utilisation :
+Si le schéma n'est pas géré par frontMkmPy, créer les tables propres à MKMOraclePi avec :
 
 ```bash
 mysql -u <user> -p <database> < "update from mkmpy.sql"
 ```
 
-**Structure de la base de données attendue :**
+## Utilisation
 
-```sql
--- Table des prix historiques
-CREATE TABLE prices (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    idProduct INT NOT NULL,
-    date_data DATE NOT NULL,
-    avg1 DECIMAL(10,2),          -- Prix normal
-    avg1_foil DECIMAL(10,2)      -- Prix foil
-);
+Les scripts se lancent depuis la racine du projet :
 
--- Table des prédictions
-CREATE TABLE prices_predict (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    idProduct INT NOT NULL,
-    date_data DATE NOT NULL,
-    avg1 DECIMAL(10,2),
-    avg1_foil DECIMAL(10,2)
-);
+| Commande | Rôle | Fréquence conseillée |
+|---|---|---|
+| `python launch_learn.py` | Entraîne le modèle sur tout l'historique et le sauvegarde | Hebdomadaire |
+| `python launch_predict.py` | Prédit les prochains jours et remplace le contenu de `prices_predict` | Quotidienne, après l'import mkmpy |
+| `python launch_evaluate.py [jours]` | Mesure la qualité du modèle, sans rien écrire en base ni sur disque | Ponctuelle |
+
+`launch_learn.py` et `launch_predict.py` enregistrent chaque exécution dans la table `logs_oracle`, avec le statut `ongoing`, puis `finished` ou `failed`. En cas d'erreur, ils affichent la trace et sortent avec le code 1, ce qui permet à cron de détecter l'échec.
+
+### Évaluer le modèle
+
+`launch_evaluate.py` met de côté les derniers jours de chaque série (autant que `nb_predictions`), entraîne un modèle temporaire sur le reste, puis compare ses prévisions à la **baseline naïve** « le prix reste égal au dernier prix connu ». L'argument facultatif limite l'historique utilisé aux N derniers jours.
+
+```
+Jour | MAE modèle |   MAE naïf | MAPE modèle |  MAPE naïf | modèle meilleur
+J+1  |      1.267 |      1.130 |       2.6% |      2.3% |           40.8%
+...
 ```
 
-## 📖 **Utilisation**
+Si le modèle ne fait pas mieux que la baseline, ses prévisions n'apportent rien.
 
-### Entraînement du modèle
-```bash
-python launch_learn.py
+## Configuration
+
+Le fichier `config.ini` est cherché dans le dossier parent du dossier courant (`../config.ini`), puis dans le dossier courant. Voir [config.ini.sample](config.ini.sample) pour un exemple commenté.
+
+| Section | Clé | Défaut | Rôle |
+|---|---|---|---|
+| `Database` | `host`, `port`, `user`, `password`, `database` | — | Connexion MySQL |
+| `Folders` | `temp` | `./data/` | Dossier du modèle sauvegardé et du CSV de prévisions |
+| `IA` | `window_size` | `7` | Nombre de jours de prix en entrée du modèle |
+| `IA` | `nb_predictions` | `10` | Nombre de jours prédits |
+| `IA` | `n_estimators` | `200` | Nombre d'arbres |
+| `IA` | `max_depth` | `15` | Profondeur maximale des arbres |
+| `IA` | `min_samples_split` | `5` | Échantillons minimum pour diviser un nœud |
+| `IA` | `min_samples_leaf` | `2` | Échantillons minimum par feuille |
+| `IA` | `max_features` | `sqrt` | Features considérées à chaque division (sans guillemets) |
+| `IA` | `n_jobs` | `-1` | Cœurs CPU utilisés (`-1` : tous) |
+| `IA` | `random_state` | `42` | Graine aléatoire, pour des résultats reproductibles |
+
+Après un changement de `window_size`, il faut relancer `launch_learn.py` : le modèle sauvegardé attend une fenêtre de la taille avec laquelle il a été entraîné.
+
+## Fonctionnement
+
+1. **Données** : pour chaque carte, la série des prix moyens `avg1` (normal) et `avg1_foil` (foil) est lue dans `prices`, triée par date. Un prix absent (`NULL`) est remplacé par 0.
+2. **Apprentissage** : chaque série est découpée en fenêtres glissantes de `window_size` jours. Le modèle apprend à prédire le prix du jour suivant à partir d'une fenêtre. Un seul modèle est entraîné pour toutes les cartes, normales et foil confondues.
+3. **Prédiction** : le modèle prédit J+1 à partir des derniers jours connus, réinjecte cette prévision dans la fenêtre pour prédire J+2, et ainsi de suite jusqu'à `nb_predictions`. Une prévision négative ou nulle est enregistrée comme `NULL`.
+4. **Écriture** : les prévisions sont écrites dans `<temp>/predicts.csv`, puis la table `prices_predict` est vidée et rechargée depuis ce fichier.
+
+Fichiers produits dans le dossier `temp` :
+
+| Fichier | Contenu |
+|---|---|
+| `rf_model_mem.joblib` | Modèle entraîné |
+| `scaler_X.joblib` | Normaliseur des features |
+| `predicts.csv` | Dernières prévisions (`id;date_data;avg1;avg1_foil;idProduct`) |
+
+### Limites connues
+
+- Le modèle travaille sur des prix absolus, de quelques centimes à plusieurs centaines d'euros. Une RandomForest ne sait pas extrapoler au-delà des prix vus à l'entraînement.
+- Les prix absents remplacés par 0 et les jours manquants dans l'historique faussent les fenêtres.
+- Les erreurs s'accumulent d'un jour prédit au suivant.
+
+`launch_evaluate.py` permet de vérifier l'effet de chaque amélioration sur ces points.
+
+## Structure
+
+```
+MKMOraclePy/
+├── launch_learn.py         # Entraînement
+├── launch_predict.py       # Prédiction et écriture en base
+├── launch_evaluate.py      # Évaluation face à la baseline naïve
+├── src/
+│   ├── predictopi.py       # Classe predictopi : données, apprentissage, prédiction
+│   ├── db.py               # Connexion MySQL
+│   ├── log.py              # Journalisation dans logs_oracle
+│   └── common.py           # Lecture de config.ini, export CSV
+├── data/                   # Dossier temporaire par défaut
+├── config.ini.sample
+├── update from mkmpy.sql   # Tables propres à MKMOraclePi
+└── requirements.txt
 ```
 
-### Génération des prédictions
-```bash
-python launch_predict.py
-```
+## Licence
 
-### Utilisation programmatique
-```python
-from src.predictopi import predictopi
-
-# Créer une instance
-predictor = predictopi(reset=False)
-
-# Collecter les données (7 derniers jours)
-predictor.gatherData(limit=7)
-
-# Entraîner le modèle (si nécessaire)
-predictor.learn()
-
-# Générer les prédictions
-predictor.predict()
-
-# Insérer en base de données
-predictor.insertPredictionsToDB()
-```
-
-## ⚙️ **Configuration**
-
-Le fichier `config.ini` contient les paramètres suivants :
-
-```ini
-[Database]
-# Adresse du serveur MySQL (ex: localhost ou IP)
-host     = yourhost
-# Nom d'utilisateur MySQL
-user     = user
-# Mot de passe MySQL
-password = pwd
-# Nom de la base de données à utiliser
-database = mkmpy
-# Port MySQL (par défaut 3306)
-port     = 3306
-
-[Folders]
-# Dossier temporaire pour stocker les modèles et fichiers intermédiaires
-temp       = ./data/
-
-[IA]
-# Nombre d'arbres dans la forêt
-n_estimators=200
-# Profondeur maximale des arbres
-max_depth=15
-# Nombre minimum d'échantillons requis pour diviser un noeud
-min_samples_split=5
-# Nombre minimum d'échantillons requis pour être à une feuille
-min_samples_leaf=2
-# Nombre de caractéristiques à considérer lors de la recherche de la meilleure séparation
-max_features='sqrt'
-# Nombre de cœurs CPU à utiliser (-1 pour tous les cœurs)
-n_jobs=-1
-# État aléatoire pour la reproductibilité des résultats
-random_state=42
-```
-
-## 🧠 **Modèle de Machine Learning**
-
-- **Algorithme** : RandomForestRegressor (100 arbres)
-- **Features** : Fenêtre glissante de 4 jours de prix
-- **Normalisation** : StandardScaler pour optimiser les performances
-- **Prédiction** : 7 jours futurs par itération
-- **Types** : Prix normal et foil traités séparément
-
-### Optimisations mémoire
-- Pré-allocation des arrays NumPy
-- Utilisation de `float32` au lieu de `float64`
-- Nettoyage explicite des variables temporaires
-- Fenêtre glissante efficace avec `np.roll()`
-
-## 🚀 Optimisations récentes
-
-### Prédiction en batch
-- La méthode `predict` utilise désormais la prédiction en batch pour accélérer le calcul sur de grandes quantités de cartes.
-- Les features de toutes les cartes à prédire pour chaque jour sont regroupées et traitées en une seule opération, exploitant le parallélisme interne de scikit-learn.
-- Le CSV de sortie est écrit en une seule fois pour limiter les accès disque.
-
-### Gains de performance
-- Temps de prédiction fortement réduit, surtout pour les gros volumes de données.
-- Moins d'overhead Python, meilleure utilisation du CPU.
-- Optimisation mémoire conservée (pré-allocation, float32, nettoyage explicite).
-
-## 🆕 Exemple d'utilisation optimisée
-
-```python
-from src.predictopi import predictopi
-
-predictor = predictopi(reset=False)
-predictor.gatherData(limit=7)
-predictor.learn()
-predictor.predict()  # Prédiction accélérée en batch
-predictor.insertPredictionsToDB()
-```
-
-## 📊 **Données de sortie**
-
-Les prédictions sont sauvegardées dans :
-- **Fichier CSV** : `data/predicts.csv`
-- **Base de données** : Table `prices_predict`
-
-Format des données :
-```csv
-id;date_data;avg1;avg1_foil;idProduct
-0;2025-09-26;12.34;45.67;12345
-```
-
-## 🔧 **Développement**
-
-### Structure du code principal
-```python
-class predictopi:
-    def __init__(self, reset=False)      # Initialisation
-    def gatherData(self, limit=None)     # Collecte des données
-    def learn(self)                      # Entraînement
-    def predict(self)                    # Prédiction
-    def insertPredictionsToDB(self)      # Insertion en base
-```
-
-## 📈 **Performance**
-
-- **Optimisation mémoire** : -50% d'usage grâce aux optimisations numpy
-- **Vitesse** : Pré-allocation des arrays pour éviter les copies
-- **Persistance** : Sauvegarde automatique des modèles entraînés
-
-## 📄 **Licence**
-
-Ce projet est sous licence MIT.
-
-## 🛠️ **Stack Technique**
-
-- **Python 3.11+** - Langage principal
-- **NumPy** - Calculs numériques optimisés
-- **pandas** - Manipulation des données temporelles
-- **scikit-learn** - Machine Learning (RandomForest, StandardScaler)
-- **joblib** - Sérialisation des modèles
-- **MySQL** - Base de données
+MIT

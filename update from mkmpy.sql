@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS `logsteps` (
 INSERT IGNORE INTO `logsteps` (`id`, `step`) VALUES
 	(10, 'ongoing'),
 	(50, 'finished'),
-	(90, 'too early');
+	(90, 'too early'),
+	(95, 'failed');
 	
 -- Listage des données de la table mkmpy2.prices_predict : ~0 rows (environ)
 
