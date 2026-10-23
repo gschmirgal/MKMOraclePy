@@ -204,7 +204,9 @@ class predictopi:
         :return: True si la prédiction a réussi
         """
         if self.series_dict is None:
-            self.gatherData(self.window_size)
+            # Période plus large que la fenêtre : des jours d'import manquants ne doivent pas
+            # empêcher de trouver window_size prix par carte (seuls les derniers sont utilisés)
+            self.gatherData(self.window_size * 3)
 
         # Dernière fenêtre de chaque carte et type (normal et foil)
         # Une fenêtre entièrement à 0 (prix absent) n'est pas prédite : le modèle n'apprend pas sur ces cas
@@ -239,6 +241,10 @@ class predictopi:
                         result_dict[product_id][field] = float(pred)
                 # Ajoute tous les résultats de ce jour
                 all_results.extend(result_dict.values())
+
+        # Sans prévision, on s'arrête avant que insertPredictionsToDB ne vide la table
+        if not all_results:
+            raise RuntimeError(f"Aucune prévision générée : aucune carte n'a {self.window_size} prix récents en base")
 
         # Écriture groupée du CSV
         with open(self.temp_folder+"predicts.csv", "w", encoding="utf-8") as f_predicts:
